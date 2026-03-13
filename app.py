@@ -1,77 +1,67 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURACIÓN E INTERFAZ ---
-st.set_page_config(page_title="Seguimiento de Ventas", layout="wide", page_icon="📈")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Control de Ventas", layout="wide")
 
-st.title("🛡️ Sistema de Control de Ventas - Seguros")
-st.markdown("Registro rápido para asesores y visualización de metas semanales.")
+st.title("📈 Sistema de Seguimiento de Ventas")
+st.markdown("Herramienta para el registro de citas y emisiones.")
 
-# --- CONEXIÓN A GOOGLE SHEETS ---
+# --- CONEXIÓN ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def cargar_datos():
-    try:
-        # ttl=0 para que siempre lea datos nuevos
-        return conn.read(ttl=0).dropna(how="all")
-    except:
-        return pd.DataFrame(columns=["asesor", "etapa", "fecha", "mes_texto", "semana_año"])
+# Intentar leer datos
+try:
+    df = conn.read(ttl=0)
+    df = df.dropna(how="all")
+except Exception as e:
+    st.error("No se pudo leer la base de datos. Verifica el link en Secrets.")
+    df = pd.DataFrame(columns=["asesor", "etapa", "fecha", "mes_texto", "semana_año"])
 
-df = cargar_datos()
-
-# --- BARRA LATERAL: REGISTRO DE DATOS ---
+# --- FORMULARIO ---
 with st.sidebar:
-    st.header("📝 Registrar Actividad")
-    with st.form("form_registro", clear_on_submit=True):
+    st.header("📝 Nuevo Registro")
+    with st.form("registro_ventas", clear_on_submit=True):
         nombre = st.text_input("Nombre del Asesor").upper().strip()
-        etapa = st.selectbox("Etapa del Proceso", 
-                             ["Cita Inicial", "Cita de Cierre", "Emisión de Póliza", "Póliza Pagada"])
-        
-        btn_guardar = st.form_submit_button("Guardar Registro")
+        etapa = st.selectbox("Etapa", ["Cita Inicial", "Cita de Cierre", "Emisión de Póliza", "Póliza Pagada"])
+        submit = st.form_submit_button("Guardar Registro")
 
-if btn_guardar:
+if submit:
     if nombre:
+        ahora = datetime.now()
+        nuevo_dato = {
+            "asesor": nombre,
+            "etapa": etapa,
+            "fecha": ahora.strftime("%Y-%m-%d"),
+            "mes_texto": ahora.strftime("%B"),
+            "semana_año": int(ahora.isocalendar()[1])
+        }
+        
+        # Crear el nuevo DataFrame
+        nuevo_df = pd.DataFrame([nuevo_dato])
+        df_final = pd.concat([df, nuevo_df], ignore_index=True)
+        
         try:
-            ahora = datetime.now()
-            nuevo_registro = pd.DataFrame([{
-                "asesor": nombre,
-                "etapa": etapa,
-                "fecha": ahora.strftime("%Y-%m-%d"),
-                "mes_texto": ahora.strftime("%B"),
-                "semana_año": int(ahora.isocalendar()[1])
-            }])
-            
-            # Combinar datos viejos con el nuevo
-            df_actualizado = pd.concat([df, nuevo_registro], ignore_index=True)
-            
-            # Guardar usando el link de los secrets
-            conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df_actualizado)
-            
+            # Intentar actualizar la hoja
+            conn.update(data=df_final)
             st.sidebar.success(f"✅ ¡Registrado para {nombre}!")
             st.rerun()
         except Exception as e:
-            st.error(f"Error al guardar: {e}. Revisa que tu Google Sheet tenga permisos de EDITOR.")
+            st.error("⚠️ Google bloqueó el guardado directo.")
+            st.info("Para solucionar esto, asegúrate de que el link en 'Secrets' termine en '/edit' y que compartieras la hoja como EDITOR.")
     else:
-        st.sidebar.error("⚠️ Por favor ingresa tu nombre.")
+        st.sidebar.warning("Escribe un nombre.")
 
-# --- DASHBOARD PRINCIPAL ---
+# --- VISUALIZACIÓN ---
 if not df.empty:
-    # Métricas simples
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total Movimientos", len(df))
-    m2.metric("Pólizas Pagadas", len(df[df['etapa'] == "Póliza Pagada"]))
-    m3.metric("Asesores Activos", df['asesor'].nunique())
-
-    st.divider()
-
-    st.subheader("📈 Rendimiento por Asesor")
-    # Tabla resumen por etapas
+    st.subheader("Resumen de Rendimiento")
+    # Tabla pivote para ver citas y ventas por asesor
     resumen = df.groupby(['asesor', 'etapa']).size().unstack(fill_value=0)
     st.dataframe(resumen, use_container_width=True)
-
-    with st.expander("Ver historial completo"):
-        st.write(df.sort_values(by='fecha', ascending=False))
+    
+    with st.expander("Ver Historial Completo"):
+        st.write(df.sort_values(by="fecha", ascending=False))
 else:
-    st.info("👋 ¡Bienvenido! Ingresa el primer registro en el panel de la izquierda para comenzar.")
+    st.info("Esperando el primer registro...")
