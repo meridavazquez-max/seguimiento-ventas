@@ -1,9 +1,3 @@
-# 1. Instalamos lo necesario
-!pip install streamlit pandas st-gsheets-connection pyngrok -q
-
-# 2. Escribimos el archivo de la app
-with open('app.py', 'w') as f:
-    f.write("""
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
